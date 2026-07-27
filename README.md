@@ -72,7 +72,3 @@ report (`<model_id>_report.json`, written by `Reporter`) with arguments, trainin
 injected-anomaly metrics, plus diagnostic plots (feature overview, train/val loss, score
 histograms, anomaly-score timelines).
 
-
-## License
-
-*(No license file is currently committed — add one, e.g. MIT/Apache-2.0, before wider release.)*
