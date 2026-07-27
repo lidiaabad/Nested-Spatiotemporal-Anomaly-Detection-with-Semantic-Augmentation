@@ -1,12 +1,18 @@
-# Nested-Spatiotemporal-Anomaly-Detection-with-Semantic-Augmentation
-This repository includes the code, model chekpoints and data employed for the development of the paper Nested Spatiotemporal Anomaly Detection with Semantic Augmentation: A Case Study in Heritage Conservation. Developed as part of the **ARGUS** project for structural health
-monitoring of cultural heritage sites.
+# Nested Spatiotemporal Anomaly Detection with Semantic Augmentation
+
+Code, model checkpoints, and data used to develop **NST-Net** (`NestedAD` in code), a nested
+spatiotemporal deep learning framework for multivariate time series anomaly detection (MTSAD),
+paired with a semantic, expert-knowledge (EK) rule-based module. Developed as part of the
+**ARGUS** project for structural health monitoring of cultural heritage sites.
+
+> Paper: *Nested Spatiotemporal Anomaly Detection with Semantic Augmentation: A Case Study in
+> Heritage Conservation* (in preparation / under review, MDPI *Sensors*).
 
 ## About ARGUS
 
-ARGUS is a cultural heritage structural health monitoring project spanning five European
-pilot sites, each instrumented with heterogeneous environmental and structural sensors
-(temperature, humidity, crack meters, tilt, airflow, air quality, etc.):
+ARGUS is a cultural heritage structural health monitoring project spanning five European pilot
+sites, each instrumented with heterogeneous environmental and structural sensors (temperature,
+humidity, crack meters, tilt, airflow, air quality, soil moisture, PPV, GNSS, etc.):
 
 - **Delos** (Greece)
 - **Baltanás** (Spain)
@@ -15,96 +21,58 @@ pilot sites, each instrumented with heterogeneous environmental and structural s
 - **Schenkenberg** (Switzerland)
 
 Sensor data at each site is irregular, multi-cadence, and affected by high missingness — the
-preprocessing pipeline in this repo is built to handle exactly that.
+preprocessing pipeline in this repo is built to handle exactly that, and each site has its own
+set of expert-knowledge (EK) anomaly rules and threshold overrides (see `dataloaders.py`).
 
 ## Repository structure
 
 ```
 .
-├── data/                   #Available upon request
-├── logs/                   # Training and evaluation run logs
+├── data/                       # ARGUS pilot-site data — available upon request
+├── logs/                       # Training / evaluation run logs
 ├── models/
-│   └── checkpoints/        # Saved models
-├── notebooks/               # Exploratory analysis, diagnostics, and figure-generation notebooks
-├── src/
-│   └── data/                # Data loading & preprocessing (this file's home)
-│       ├── pilots_preprocesing.py   # ARGUS pilot-site preprocessing (TimeSeriesData, TSDataset)
-│       ├── ek_rules.py              # Definition of EK rules (semantic module)
-│       └── dataloaders.py           # creation of the dataset instance and dataloaders.
-|       
-└── README.md
+│   └── checkpoints/            # Saved model checkpoints (<model_id>_<dataset>/)
+├── notebooks/
+│   └── evaluation.ipynb        # Results exploration / figure generation
+└── src/
+    ├── run.py                  # Main entrypoint: parses args, builds dataset, runs the pipeline
+    ├── shrun.sh                # Example SLURM/local batch script running several configs in series
+    ├── config/
+    │   ├── arguments.py        # All CLI arguments (see below)
+    │   └── reporter.py         # Reporter: collects and dumps per-run results to JSON
+    ├── data/
+    │   ├── pilots_preprocessing.py  # TimeSeriesData (raw ARGUS loading/cleaning) + TSDataset
+    │   ├── ekrules.py               # RuleEngine: per-site expert-knowledge anomaly rules
+    │   └── dataloaders.py           # Builds the TimeSeriesData entity, TSDataset, and DataLoaders
+    ├── models/
+    │   └── archs.py             # NestedAD (NST-Net) architecture, RevIN, RMSNorm, SerializableModule registry
+    ├── train_test/
+    │   └── train_test.py        # Training loop, scoring, thresholding, and metric computation
+    └── utils/
+        ├── helpers_setup.py     # Seeding, device/experiment setup, ACF/PACF temporal analysis
+        ├── helpers_output.py    # Scoring, thresholding (POT/optimized POT), anomaly reporting
+        └── helpers_plots.py     # All diagnostic and results plotting
 ```
-
-## Core components
-
-### `src/data/pilots_preprocesing.py`
-
-- **`TimeSeriesData`** — base dataset for a single ARGUS pilot site. Reads every sensor CSV in
-  a site's folder, merges by sensor/variable name, applies site-specific contextual
-  corrections (documented inline, flagged with `# TBC` where a written justification is still
-  owed for the paper/appendix), detects frozen periods, resamples to a common frequency,
-  converts raw sensor units to physical units, and derives expert-knowledge (EK) anomaly
-  labels via a per-site `RuleEngine`.
-- **`TSDataset`** — model-ready `torch.utils.data.Dataset` built on top of `TimeSeriesData`.
-  Performs the temporal train/val/test split, drops low-coverage features per split, imputes
-  and scales (fit on train only, alive-aware), and injects synthetic collective / contextual /
-  point anomalies into the test split for controlled evaluation, using a round-robin scheduler
-  so no anomaly type starves the others.
-
-### `src/data/pub_ddbb.py`
-
-Loaders and preprocessing utilities for the public MTSAD benchmarks (SMAP, MSL, SMD, WADI,
-SWaT) used as baselines, plus a shared forecasting-window / dataloader pipeline
-(`PublicTimeSeriesData`) so ARGUS and public-benchmark data can be run through the same
-downstream evaluation code.
-
-## Known open items (`# TBC` markers)
-
-Throughout `pilots_preprocesing.py`, manual per-site decisions (sensor drops, frozen-period
-date ranges, unit-conversion constants, thresholds) are marked `# TBC` where they still need a
-short written justification for reviewers. Search the file for `# TBC` to find the full list
-before submission.
 
 ## Getting started
 
 ```bash
 git clone https://github.com/lidiaabad/Nested-Spatiotemporal-Anomaly-Detection-with-Semantic-Augmentation.git
 cd Nested-Spatiotemporal-Anomaly-Detection-with-Semantic-Augmentation
-pip install -r requirements.txt   # add this file if not already present
+pip install -r requirements.txt 
 ```
+` nohup ./src/shrun.sh` to run the overall pipeline 
 
-Example usage:
+Add `--eval_only_pt --loaded_path <name>` to re-evaluate an existing checkpoint from
+`models/checkpoints/` across 10 seeds instead of training from scratch (see the `eval_only_pt`
+branch in `src/run.py`, which reports mean ± std over the 10 runs).
 
-```python
-from data.pilots_preprocesing import TimeSeriesData, TSDataset
+Outputs land in `models/checkpoints/<model_id>_<dataset>/`: the trained checkpoint, a JSON
+report (`<model_id>_report.json`, written by `Reporter`) with arguments, training curves, and
+injected-anomaly metrics, plus diagnostic plots (feature overview, train/val loss, score
+histograms, anomaly-score timelines).
 
-ts_data = TimeSeriesData(folder_path="data/delos", freq="15min", ek=True)
-
-dataset = TSDataset(
-    mode="train",
-    data=ts_data.raw_df_with_alive,
-    feature_names=ts_data.feature_names,
-    lb=48,
-    val_ratio=0.15,
-    test_ratio=0.15,
-    positive=ts_data.ek_rules[0] if ts_data.ek_rules else None,
-)
-```
-
-## Citation
-
-If you use this code, please cite:
-
-```bibtex
-@article{abad_nstnet,
-  title   = {Nested Spatiotemporal Anomaly Detection with Semantic Augmentation: A Case Study in Heritage Conservation},
-  author  = {Abad, Lidia and collaborators},
-  journal = {Sensors (MDPI)},
-  year    = {2026},
-  note    = {Under review}
-}
-```
 
 ## License
 
-*(Add a license, e.g. MIT/Apache-2.0, if not already present in the repo.)*
+*(No license file is currently committed — add one, e.g. MIT/Apache-2.0, before wider release.)*
