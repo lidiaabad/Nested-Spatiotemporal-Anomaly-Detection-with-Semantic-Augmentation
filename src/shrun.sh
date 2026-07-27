@@ -77,7 +77,6 @@ do
     read -r model_id database data_path loaded_path beta anom_type anom_sev <<< "$combo"
     echo "************ ${model_id^^} - ${database^^} **************"
 
-python3 -u src/run.py \
    python3 -u src/run.py \
     --mode $mode \
     --mode_pt $mode_pt \
