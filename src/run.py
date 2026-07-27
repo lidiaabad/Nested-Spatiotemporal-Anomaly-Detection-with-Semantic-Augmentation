@@ -25,6 +25,7 @@ if __name__ == "__main__":
     public_datasets = ["SMD", "SMAP", "MSL", "SWAT", "WADI"]
 
     if args.dataset in public_datasets:
+       # Experimental: public dataset support is not yet fully implemented or validated.
         public_data_path = "../../../Documents/ARGUS_local/PublicDatabases/"
         entity_list = pub_ddbb.list_entities( os.path.join(public_data_path, f"processed_{args.dataset}"))
         entities = entity_list[-3:]  # or entity_list
