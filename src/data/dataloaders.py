@@ -1,5 +1,6 @@
 
-import os, datetime, torch, copy
+import os, datetime, torch
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -21,15 +22,15 @@ def build_loaders(base_dataset, args, positive=None):
                             figure_path=os.path.join(build_experiment_path(args), "split_plot"), 
                             inject_on_init=True, anom_freq=args.anom_freq, anom_type=args.anom_type, anom_sev=args.anom_sev)
 
-    pre_ds.mode = "train"
-    pre_ds.current_data = pre_ds.all_data["train"]
-    loaders["train"] = DataLoader(pre_ds, batch_size=args.batch_size, shuffle=False) 
-    pre_ds.mode = "val"
-    pre_ds.current_data = pre_ds.all_data["val"]
-    loaders["val"] = DataLoader(pre_ds, batch_size=args.batch_size,shuffle=False)
-    pre_ds.mode = "test"
-    pre_ds.current_data = pre_ds.all_data["test"]
-    loaders["test"] = DataLoader(pre_ds, batch_size=1, shuffle=False)
+    def clone_for_mode(ds, mode):
+        new_ds = deepcopy(ds)
+        new_ds.mode = mode
+        new_ds.current_data = new_ds.all_data[mode]
+        return new_ds
+    
+    loaders["train"] = DataLoader(clone_for_mode(pre_ds, "train"), batch_size=args.batch_size, shuffle=False)
+    loaders["val"]   = DataLoader(clone_for_mode(pre_ds, "val"), batch_size=args.batch_size, shuffle=False)
+    loaders["test"]  = DataLoader(clone_for_mode(pre_ds, "test"), batch_size=1, shuffle=False)
     
     test_ek = pre_ds.test_ek_mask
     feature_names = pre_ds.feature_names
