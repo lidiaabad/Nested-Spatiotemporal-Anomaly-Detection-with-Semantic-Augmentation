@@ -44,7 +44,7 @@ class TimeSeriesData:
         self.threshold_overrides = threshold_overrides or {}
 
         self.split_ranges = {}
-        print(f"Using data from {self.folder_path}\n")
+        print(f"Using data from {self.folder_path}")
 
         # Load raw merged data
         raw_merged, _, labels = self.load_raw_data()
@@ -52,6 +52,18 @@ class TimeSeriesData:
         tr_merged = self.apply_contextual_adjustments(raw_merged)
 
         if "baltanas" in self.folder_path.lower():
+            '''
+            # Keep only the functioning sensors after the restoration works
+            keep_ids = {"159313", "400212", "149443"}
+
+            cols_to_drop = []
+            for col in tr_merged.columns:
+                sid = self.extract_id(col)
+                if sid and sid not in keep_ids:
+                    cols_to_drop.append(col)
+            tr_merged.drop(columns=cols_to_drop, inplace=True)
+            print("WARNING: Model only using functioning sensors after restoration work (started on 15/04/2026). Alternative: use only data until then." )
+            '''
             # End-of-monitoring cutoff for the Baltanas pilot (restauration works)
             cutoff = pd.Timestamp("2026-04-14 23:59:59")
             tr_merged = tr_merged.loc[tr_merged.index <= cutoff]
@@ -138,10 +150,13 @@ class TimeSeriesData:
             raw = pd.to_numeric(df[col], errors="coerce")
 
             if "airflow" in name or "af" in name:
-                V = raw * 3.3 / 2048
-                out[col] = (-2.297 * V**4 + 11.854 * V**3 - 22.073 * V**2 + 19.357 * V - 5.498)
+                #V = raw # * 3.3 / 2048
+                if ssid in ["277904","467704"]: 
+                    raw=raw*3.3/2048
+                out[col] = (-2.297 * raw**4 + 11.854 * raw**3 - 22.073 * raw**2 + 19.357 * raw - 5.498)
                 mark()
                 continue
+            
 
             if "soilmoisture" in name or "moisture" in name:
                 if ssid in ["149423", "149368"]:
@@ -151,7 +166,7 @@ class TimeSeriesData:
                 mark()
                 continue
 
-            if "light" in name or "lux" in name:
+            if "lux" in name:
                 out[col] = raw * 1200
                 mark()
                 continue
@@ -183,8 +198,9 @@ class TimeSeriesData:
                 mark()
                 continue
 
-            if "rain" in name:
-                out[col] = raw * 0.2
+            if "rain_out" in name:
+                out[pd.col] = raw.diff().clip(lower=0) * 0.2
+                out[col] = out[col].fillna(0)
                 mark()
                 continue
 
@@ -626,16 +642,16 @@ class TimeSeriesData:
 
         if "delos" in folder:
             # Sensor 149678 changed monitored surface (plaster wall -> mosaic) on this date, so pre/post readings are not comparable
-            elim_date = pd.Timestamp("2026-02-11")
-            for sid in ["149678"]:
-                split_sensor(sensor_id=sid, cutoff=elim_date, elim_date=elim_date)
+            #elim_date = pd.Timestamp("2026-02-11")
+            #for sid in ["149678"]:
+            #    split_sensor(sensor_id=sid, cutoff=elim_date, elim_date=elim_date)
 
             for col in df.columns:
                 sid = self.extract_id(col)
                 # Sensor 149423 dropped entirely -- corrupted data for the whole monitoring period (excluded from paper results)
                 if sid in ["149423"]:
                     df.drop(columns=col, inplace=True)
-                    print(f"Sensor {sid} removed due to corrupted data in {col}")
+                    #print(f"Sensor {sid} removed due to corrupted data in {col}")
 
         if "baltanas" in folder:
             shelly_ids = ["caa50b", "7020c8", "caa416", "701ee3"]  #Shelly-brand humidity/temp sensors, handled separately below
@@ -667,7 +683,7 @@ class TimeSeriesData:
                             mask = df[col] == 0
                             if mask.any():
                                 df.loc[mask, col] = np.nan
-                                print(f"Temperature=0 removed for {col}")
+                                #print(f"Temperature=0 removed for {col}")
                         # Humidity < 70 treated as sensor error (stuck low value,observed around 50/66) for this sensor group specifically
                         if "hum" in col.lower() or "humedad" in col.lower():
                             mask = df[col] < 70
@@ -715,26 +731,21 @@ class TimeSeriesData:
                     mask_time = (df.index == elim_date2)
                     if mask_time.any():
                         df.loc[mask_time, col] = np.nan
-            for col in df.columns:
-                if "rain_out" in col.lower():
-                    # Convert cumulative rain gauge reading to a rain rate
-                    v = pd.to_numeric(df[col], errors="coerce").astype(float)
-                    diff = v.diff()
-                    diff[diff < 0] = np.nan
-                    df[col] = diff
+
                 if "so2" in col.lower():
                     # SO2 sensor dropped for this site (no reliable calibration, negative)
                     df.drop(columns=col, inplace=True)
-                    print(f"Dropped column: {col}")
+                    #print(f"Dropped column: {col}")
 
         if "schenkenberg" in folder:
-            # Sensors 600345/152914/152555/175480 (moisture, tilt1, acc2, acc4)
+            # Sensors 600345
             # dropped entirely -- corrupted data for the whole monitoring period, to be reviewed in a few months
-            corrupted_sens = ["600345", "152914", "152555", "175480"]
+            corrupted_sens = ["600345", "152914", "152555", "175480"] 
             for col in df.columns:
                 sid = self.extract_id(col)
                 if sid in corrupted_sens:
                     df.drop(columns=col, inplace=True)
+                    print("[WARNING] removed", sid)
                     continue
 
                 # RMS-derived columns are redundant with the raw signal
@@ -881,6 +892,9 @@ class TimeSeriesData:
             
             end = pd.Timestamp("2025-10-21") 
             mark_frozen(['151805'], end=end)
+            
+            end = pd.Timestamp("2026-02-12")
+            mark_frozen(['149678'], end=end)
     
     
         if "baltanas" in folder:
@@ -992,6 +1006,10 @@ class TimeSeriesData:
             start1 = pd.Timestamp("2025-12-18")  # corrupted
             end2 = pd.Timestamp("2026-01-19")
             mark_frozen(['359111'], start=start1, end=end2)
+        
+        if "schenkenberg" in folder:
+            end = pd.Timestamp("2026-06-10")  # trials before 10/06 are non-reliable in accs
+            mark_frozen(['159070', '152555', '152479', '175480'], end=end)
 
         # Any column with a registered valid window (split_sensor _pre/_post,
         # OR a manually NaN'd sub-range via register_valid_window) must have
@@ -1248,11 +1266,28 @@ class TSDataset(Dataset):
     def __init__(self, mode, data, feature_names, lb, val_ratio, test_ratio,
                  split_order=None, positive=None, augment=False, figure_path="",
                  scaler_save_path=None, inject_on_init=True, anom_freq=0.01, anom_type="all",
-                 anom_sev=1, natural_extreme_c=12.0, natural_extreme_window=48):
+                 anom_sev=1, natural_extreme_c=12.0, natural_extreme_window=48, 
+                 train_history_pct=None,  baseline_preprocessing=False):
 
         self.learning_mode = mode
-        self.data = data.copy()
-        self.data = self.data[feature_names].copy()
+        self.train_history_pct = train_history_pct   # <-- NEW
+
+        full_data = data[feature_names].copy()
+
+        # --- NEW: trim BEFORE any split is computed ---
+        if train_history_pct is not None:
+            if not (0 < train_history_pct <= 1.0):
+                raise ValueError("train_history_pct must be in (0, 1].")
+            n_total_full = len(full_data)
+            n_keep = int(round(train_history_pct * n_total_full))
+            n_keep = max(n_keep, 1)
+            full_data = full_data.iloc[-n_keep:]   # most recent n_keep rows only
+            print(f"[train_history_pct={train_history_pct}] "
+                f"trimmed dataset to {len(full_data)}/{n_total_full} rows "
+                f"({len(full_data)/n_total_full:.1%})")
+        # --- end new ---
+
+        self.data = full_data
         self.feature_names = feature_names
         self.val_ratio = val_ratio
         self.lb = lb
@@ -1268,7 +1303,11 @@ class TSDataset(Dataset):
         self.anom_sev = anom_sev
         self.natural_extreme_c = natural_extreme_c
         self.natural_extreme_window = natural_extreme_window
-
+        self.train_history_pct = train_history_pct 
+        self.baseline_preprocessing = baseline_preprocessing
+        if self.baseline_preprocessing:
+           print ("Using same preprocessing as in baselines: No Fc, no alive mask, no revin")
+        
         # NOTE: assumes exactly 6 trailing cyclic columns (hour/dow/doy sin+cos)
         # appended after the raw+alive feature blocks -- see _preprocess_data.
         self.n_features_base = (data.shape[1] - 6) // 2
@@ -1284,7 +1323,7 @@ class TSDataset(Dataset):
 
     def __len__(self):
         # -lb-1 so that __getitem__ can safely access idx+lb (forecast target)
-        return len(self.current_data) - self.lb - 1
+        return max(0, len(self.current_data) - self.lb - 1)
 
     def __getitem__(self, idx):
         """
@@ -1313,6 +1352,18 @@ class TSDataset(Dataset):
             x = levels[:-1, :]
             y_rec = raw_levels[:-1, :n_features]
             y_fc = raw_levels[-1, :n_features]
+        
+        # ---------------------------------------------------------
+        # Baseline preprocessing:
+        #   1. Ignore sensor availability information
+        #   2. Remove temporal/context features from the input
+        # ---------------------------------------------------------
+        if self.baseline_preprocessing:
+            alive = np.ones_like(alive)
+
+            # Last six columns of x are cyclic/context features
+            x = x.copy()
+            x[:, -6:] = 0.0
 
         if self.ek_splits is not None:
             ek_label = int(np.any(self.ek_splits[self.mode][idx: idx + self.lb]))
@@ -1436,8 +1487,14 @@ class TSDataset(Dataset):
 
         """
         train_imp = self.imputer.fit_transform(train_raw)
-        val_imp = self.imputer.transform(val_raw)
-        test_imp = self.imputer.transform(test_raw)
+        if len(val_raw) > 0: 
+            val_imp = self.imputer.transform(val_raw)
+        else: 
+            val_imp = val_raw.copy()
+        if len(test_raw) > 0: 
+            test_imp = self.imputer.transform(test_raw)
+        else: 
+            test_imp=test_raw.copy()
 
         n_features = train_imp.shape[1] - 6  # exclude cyclic
         n_features_ext = train_imp.shape[1]
@@ -1476,8 +1533,10 @@ class TSDataset(Dataset):
                 scaler_f.scale_[scaler_f.scale_ == 0] = 1.0
 
             train_scaled[:, f] = scaler_f.transform(train_imp[:, f].reshape(-1, 1)).flatten()
-            val_scaled[:, f] = scaler_f.transform(val_imp[:, f].reshape(-1, 1)).flatten()
-            test_scaled[:, f] = scaler_f.transform(test_imp[:, f].reshape(-1, 1)).flatten()
+            if len(val_raw) > 0: 
+                val_scaled[:, f] = scaler_f.transform(val_imp[:, f].reshape(-1, 1)).flatten()
+            if len(test_raw) > 0: 
+                test_scaled[:, f] = scaler_f.transform(test_imp[:, f].reshape(-1, 1)).flatten()
 
             fitted_scalers[f] = scaler_f
 
@@ -1489,28 +1548,21 @@ class TSDataset(Dataset):
                     "imputer": self.imputer,
                     "n_features": n_features,
                 }, f)
-            print(f"Scalers saved to {self.scaler_save_path}")
+            #print(f"Scalers saved to {self.scaler_save_path}")
 
         self.fitted_scalers = fitted_scalers
         return train_scaled, val_scaled, test_scaled
 
     def drop_low_alive_features(self, train_idx, val_idx, test_idx, alive_mask, data, min_ratio=0.10):
-        """
-        Drop features that are either < min_ratio alive OR entirely NaN in
-        ANY of train/val/test. Returns (kept_features, kept_features_core):
-        kept_features includes the trailing cyclic columns (always kept),
-        kept_features_core is the subset over the raw feature block only.
-        """
         idx_splits = [train_idx, val_idx, test_idx]
-
         n_valid_features = alive_mask.shape[1]
         n_total_features = data.shape[1]
-
         keep_mask = np.ones(n_valid_features, dtype=bool)
-
         data_valid = data[:, :n_valid_features]
 
         for split_name, idx in zip(["train", "val", "test"], idx_splits):
+            if len(idx) == 0:
+                continue  # <-- ADDED: nothing to check on an empty split
 
             alive_counts = alive_mask[idx].sum(axis=0)
             required = np.ceil(min_ratio * len(idx))
@@ -1522,13 +1574,10 @@ class TSDataset(Dataset):
             keep_mask &= ~(low_alive | all_nan)
 
         kept_features_core = np.where(keep_mask)[0]
-        last_6_features = np.arange(n_valid_features, n_total_features)  # cyclic columns, always kept
+        last_6_features = np.arange(n_valid_features, n_total_features)
         kept_features = np.concatenate([kept_features_core, last_6_features])
-
-        print(f"Core kept: {len(kept_features_core)} / {n_valid_features}")
-
+        #print(f"Core kept: {len(kept_features_core)} / {n_valid_features}")
         self.n_features = len(kept_features)
-
         return kept_features, kept_features_core
 
     def _check_split_health(self, split_raw, name):
@@ -1675,7 +1724,13 @@ class TSDataset(Dataset):
         values = original_values.copy()
         N = values.shape[0]
         start_valid, end_valid = self.lb, N - self.lb
-        cooldown_min = int(self.lb * 1.5)  # Minimum spacing between injected anomalies, in samples
+        cooldown_min = int(self.lb * 1.5) # 108
+        if freq==0.10: 
+            cooldown_min=cooldown_min//2 #54
+        elif freq==0.2: 
+            cooldown_min=cooldown_min//4 #27
+        print("Cooldown", cooldown_min)
+            
 
         feat_std = np.std(values, axis=0)
         abs_ok = feat_std > min_std
@@ -1774,16 +1829,54 @@ class TSDataset(Dataset):
             raise ValueError(f"Unknown anomaly type: {anom_type}")
 
         if n_instances is not None:
-            counts = {t: n_instances.get(t, 0) for t in ["collective", "contextual", "point"]}
+            counts = {t: n_instances.get(t, 0)for t in ["collective", "contextual", "point"]}
         else:
             if type_ratios is None:
                 type_ratios = {t: 1.0 for t in active_types}
-            ratio_sum = sum(type_ratios.get(t, 0) for t in active_types)
-            counts = {t: max(1, int(max_windows * type_ratios.get(t, 0) / ratio_sum)) for t in active_types}
+
+            type_lengths = {
+                "collective": 12,
+                "contextual": 3,
+                "point": 1,
+            }
+
+            occupancy_budget = max_windows
+            counts = {t: 0 for t in active_types}
+
+            used = 0
+
+            # Round-robin allocation. Once an anomaly makes the occupancy
+            # exceed the frequency budget, stop allocating any more.
+            while True:
+                added = False
+
+                for t in active_types:
+                    if type_ratios.get(t, 0) <= 0:
+                        continue
+
+                    length = type_lengths[t]
+
+                    counts[t] += 1
+                    used += length
+                    added = True
+
+                    # Important: the anomaly that crossed the budget is kept,
+                    # but nothing else can be added afterwards.
+                    if used >= occupancy_budget:
+                        break
+
+                if not added or used >= occupancy_budget:
+                    break
+
             for t in ["collective", "contextual", "point"]:
                 counts.setdefault(t, 0)
 
-        print(f"max_windows={max_windows} | target instance counts: {counts}")
+            print(
+                f"max_windows={max_windows} | "
+                f"occupancy_budget={occupancy_budget} | "
+                f"target instance counts={counts} | "
+                f"planned occupancy={used}"
+            )
 
         INNER_TRIES = 20  # Max retries per placement attempt before giving up on that slot
 
